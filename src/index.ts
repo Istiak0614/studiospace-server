@@ -2,13 +2,18 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
-import { errorHandler, notFound } from "./middleware/errorHandler.js";
+import { toNodeHandler } from "better-auth/node";
+import { auth } from "./lib/auth.js";
 import { db } from "./config/db.js";
+import { errorHandler, notFound } from "./middleware/errorHandler.js";
 
 const app = express();
 app.set("trust proxy", 1); 
 
 app.use(cors({ origin: process.env.CLIENT_URL, credentials: true }));
+
+app.all("/api/auth/*splat", toNodeHandler(auth));
+
 app.use(express.json());
 app.use(cookieParser());
 
@@ -18,7 +23,7 @@ app.get("/", (_req, res) => {
 
 
 app.get("/api/health", async (_req, res) => {
-  await db.command({ ping: 1 }); // if this fails, the error handler returns 500
+  await db.command({ ping: 1 });
   res.json({ status: "ok", database: "connected", time: new Date().toISOString() });
 });
 
