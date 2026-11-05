@@ -6,6 +6,7 @@ import { toNodeHandler } from "better-auth/node";
 import { auth } from "./lib/auth.js";
 import { db } from "./config/db.js";
 import { errorHandler, notFound } from "./middleware/errorHandler.js";
+import tokenRoutes from "./modules/auth/token.routes.js";
 
 const app = express();
 app.set("trust proxy", 1); 
@@ -27,6 +28,7 @@ app.get("/api/health", async (_req, res) => {
   res.json({ status: "ok", database: "connected", time: new Date().toISOString() });
 });
 
+app.use("/api", tokenRoutes);
 app.use(notFound);
 app.use(errorHandler);
 
