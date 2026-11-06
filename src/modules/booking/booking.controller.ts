@@ -119,3 +119,45 @@ export const getBookedSlots: RequestHandler<{ id: string }> = async (req, res) =
 
   res.json(slots);
 };
+
+// GET /api/bookings/mine — the logged-in creator's bookings
+export const getMyBookings: RequestHandler = async (req, res) => {
+  const email = req.user!.email;
+  const list = await bookings.find({ guestEmail: email }).sort({ startTime: -1 }).toArray();
+  res.json(list);
+};
+
+// PATCH /api/bookings/:id/cancel — PDF: creators can cancel while Pending
+export const cancelBooking: RequestHandler<{ id: string }> = async (req, res) => {
+  const _id = toObjectId(req.params.id);
+  if (!_id) {
+    res.status(400).json({ message: "Invalid booking id" });
+    return;
+  }
+
+  const booking = await bookings.findOne({ _id });
+  if (!booking) {
+    res.status(404).json({ message: "Booking not found" });
+    return;
+  }
+  if (booking.guestEmail !== req.user!.email) {
+    res.status(403).json({ message: "You can only cancel your own bookings" });
+    return;
+  }
+  if (booking.status !== "Pending") {
+    res.status(400).json({ message: `Only pending bookings can be cancelled. This one is ${booking.status.toLowerCase()}.` });
+    return;
+  }
+
+  const updated = await bookings.findOneAndUpdate(
+    { _id, status: "Pending" },
+    { $set: { status: "Cancelled", cancelledBy: "guest", updatedAt: new Date() } },
+    { returnDocument: "after" }
+  );
+  if (!updated) {
+    res.status(409).json({ message: "This booking was just updated. Please refresh." });
+    return;
+  }
+
+  res.json({ message: "Booking cancelled", booking: updated });
+};

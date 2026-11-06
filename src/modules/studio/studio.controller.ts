@@ -3,10 +3,11 @@ import { CATEGORIES, type StudioCategory } from "../../types/studio.js";
 import { escapeRegex } from "../../utils/escapeRegex.js";
 import type { RequestHandler } from "express";
 import type { WithId } from "mongodb";
-import { db, studios } from "../../config/db.js";
+import { bookings, db, studios } from "../../config/db.js";
 import type { Studio } from "../../types/studio.js";
 import { toObjectId } from "../../utils/objectId.js";
 import { validateStudioInput } from "./studio.validation.js";
+
 
 const SORT_OPTIONS: Record<string, Sort> = {
   rating: { rating: -1, reviewCount: -1, _id: 1 },
@@ -171,6 +172,23 @@ export const deleteStudio: RequestHandler<{ id: string }> = async (req, res) => 
     return;
   }
 
+    // Don't delete a studio that creators are counting on
+  const upcoming = await bookings.countDocuments({
+    studioId: owned.studio._id,
+    status: "Confirmed",
+    endTime: { $gt: new Date() },
+  });
+  if (upcoming > 0) {
+    res.status(409).json({
+      message: `This studio has ${upcoming} upcoming confirmed booking(s). Complete or cancel them before deleting.`,
+    });
+    return;
+  }
+
+  await bookings.updateMany(
+    { studioId: owned.studio._id, status: "Pending" },
+    { $set: { status: "Cancelled", cancelledBy: "host", updatedAt: new Date() } }
+  );
   await studios.deleteOne({ _id: owned.studio._id });
   res.json({ message: "Studio deleted successfully" });
 };
