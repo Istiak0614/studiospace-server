@@ -161,3 +161,92 @@ export const cancelBooking: RequestHandler<{ id: string }> = async (req, res) =>
 
   res.json({ message: "Booking cancelled", booking: updated });
 };
+
+// GET /api/bookings/requests?status= — bookings for studios I host
+export const getBookingRequests: RequestHandler = async (req, res) => {
+  const email = req.user!.email;
+  const { status } = req.query as { status?: string };
+
+  const filter: Filter<Booking> = { hostEmail: email };
+  if (status && (BOOKING_STATUSES as readonly string[]).includes(status)) {
+    filter.status = status as BookingStatus;
+  }
+
+  const list = await bookings.find(filter).sort({ createdAt: -1 }).toArray();
+  res.json(list);
+};
+
+// PATCH /api/bookings/:id/status — body: { status: "Confirmed" | "Cancelled" }
+export const updateBookingStatus: RequestHandler<{ id: string }> = async (req, res) => {
+  const { status } = req.body ?? {};
+  if (status !== "Confirmed" && status !== "Cancelled") {
+    res.status(400).json({ message: "Status must be Confirmed or Cancelled" });
+    return;
+  }
+
+  const _id = toObjectId(req.params.id);
+  if (!_id) {
+    res.status(400).json({ message: "Invalid booking id" });
+    return;
+  }
+
+  const booking = await bookings.findOne({ _id });
+  if (!booking) {
+    res.status(404).json({ message: "Booking not found" });
+    return;
+  }
+  if (booking.hostEmail !== req.user!.email) {
+    res.status(403).json({ message: "Only the host can respond to this request" });
+    return;
+  }
+  if (booking.status !== "Pending") {
+    res.status(400).json({ message: `This booking is already ${booking.status.toLowerCase()}` });
+    return;
+  }
+
+  if (status === "Confirmed") {
+    if (booking.startTime.getTime() <= Date.now()) {
+      res.status(400).json({ message: "This request's start time has already passed" });
+      return;
+    }
+    // Challenge 2 again: re-check at confirm time, so two overlapping
+    // requests can never both become Confirmed
+    const clash = await findConfirmedClash(booking.studioId, booking.startTime, booking.endTime, booking._id);
+    if (clash) {
+      res.status(409).json({ message: "Another confirmed booking already covers this time" });
+      return;
+    }
+  }
+
+  const now = new Date();
+  const updated = await bookings.findOneAndUpdate(
+    { _id, status: "Pending" },
+    { $set: { status, updatedAt: now, ...(status === "Cancelled" && { cancelledBy: "host" as const }) } },
+    { returnDocument: "after" }
+  );
+  if (!updated) {
+    res.status(409).json({ message: "This request was just updated. Please refresh." });
+    return;
+  }
+
+  let autoDeclined = 0;
+  if (status === "Confirmed") {
+    const result = await bookings.updateMany(
+      {
+        studioId: booking.studioId,
+        status: "Pending",
+        _id: { $ne: booking._id },
+        startTime: { $lt: booking.endTime },
+        endTime: { $gt: booking.startTime },
+      },
+      { $set: { status: "Cancelled", cancelledBy: "system", updatedAt: now } }
+    );
+    autoDeclined = result.modifiedCount;
+  }
+
+  res.json({
+    message: status === "Confirmed" ? "Booking confirmed" : "Booking request declined",
+    booking: updated,
+    autoDeclined,
+  });
+};
