@@ -59,6 +59,13 @@ export const auth = betterAuth({
         if (!/[a-z]/.test(password)) {
           throw new APIError("BAD_REQUEST", { message: "Password must include a lowercase letter" });
         }
+        const email = String(ctx.body?.email ?? "").trim().toLowerCase();
+        const existing = await db.collection("user").findOne({ email });
+        if (existing) {
+          throw new APIError("BAD_REQUEST", {
+            message: "An account with this email already exists. Please log in instead.",
+          });
+        }
       }
     }),
 
