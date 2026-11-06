@@ -7,6 +7,7 @@ import { auth } from "./lib/auth.js";
 import { db } from "./config/db.js";
 import { errorHandler, notFound } from "./middleware/errorHandler.js";
 import tokenRoutes from "./modules/auth/token.routes.js";
+import studioRoutes from "./modules/studio/studio.routes.js";
 
 const app = express();
 app.set("trust proxy", 1); 
@@ -29,6 +30,7 @@ app.get("/api/health", async (_req, res) => {
 });
 
 app.use("/api", tokenRoutes);
+app.use("/api/studios", studioRoutes);
 app.use(notFound);
 app.use(errorHandler);
 

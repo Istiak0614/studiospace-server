@@ -1,3 +1,4 @@
+import type { Studio } from "../types/studio.js";
 import "dotenv/config";
 import dns from "node:dns";
 import { MongoClient } from "mongodb";
@@ -11,3 +12,4 @@ if (!uri) throw new Error("MONGODB_URI is missing. Check your .env file");
 
 export const client = new MongoClient(uri);
 export const db = client.db(process.env.DB_NAME ?? "studiospace");
+export const studios = db.collection<Studio>("studios");
