@@ -48,6 +48,9 @@ export const auth = betterAuth({
   },
 
   session: { expiresIn: SEVEN_DAYS },
+  onAPIError: {
+    errorURL: `${process.env.CLIENT_URL}/login`,
+  },
 
   hooks: {
     before: createAuthMiddleware(async (ctx) => {
