@@ -1,3 +1,6 @@
+import type { Filter, Sort } from "mongodb";
+import { CATEGORIES, type StudioCategory } from "../../types/studio.js";
+import { escapeRegex } from "../../utils/escapeRegex.js";
 import type { RequestHandler } from "express";
 import type { WithId } from "mongodb";
 import { db, studios } from "../../config/db.js";
@@ -5,11 +8,68 @@ import type { Studio } from "../../types/studio.js";
 import { toObjectId } from "../../utils/objectId.js";
 import { validateStudioInput } from "./studio.validation.js";
 
-export const getStudios: RequestHandler = async (_req, res) => {
-  const list = await studios.find().sort({ createdAt: -1 }).toArray();
+const SORT_OPTIONS: Record<string, Sort> = {
+  rating: { rating: -1, reviewCount: -1, _id: 1 },
+  newest: { createdAt: -1, _id: 1 },
+  "price-asc": { hourlyRate: 1, _id: 1 },
+  "price-desc": { hourlyRate: -1, _id: 1 },
+};
+
+const toNumber = (value: unknown) => {
+  if (value === undefined || value === "") return undefined;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : undefined;
+};
+
+export const getStudios: RequestHandler = async (req, res) => {
+  const { q, category, minPrice, maxPrice, sort, page, limit } = req.query as Record<string, string | undefined>;
+
+  // Build the MongoDB filter step by step
+  const filter: Filter<Studio> = {};
+
+  if (q?.trim()) {
+    const pattern = new RegExp(escapeRegex(q.trim()), "i");
+    filter.$or = [{ title: pattern }, { location: pattern }];
+  }
+
+  if (category && (CATEGORIES as readonly string[]).includes(category)) {
+    filter.category = category as StudioCategory;
+  }
+
+  const priceFilter: { $gte?: number; $lte?: number } = {};
+  const min = toNumber(minPrice);
+  const max = toNumber(maxPrice);
+  if (min !== undefined) priceFilter.$gte = min;
+  if (max !== undefined) priceFilter.$lte = max;
+  if (Object.keys(priceFilter).length > 0) filter.hourlyRate = priceFilter;
+
+  const perPage = Math.min(Math.max(Math.floor(toNumber(limit) ?? 12), 1), 24);
+  const currentPage = Math.max(Math.floor(toNumber(page) ?? 1), 1);
+
+  const [list, total, bounds] = await Promise.all([
+    studios
+      .find(filter)
+      .sort(SORT_OPTIONS[sort ?? ""] ?? SORT_OPTIONS.rating)
+      .skip((currentPage - 1) * perPage)
+      .limit(perPage)
+      .toArray(),
+    studios.countDocuments(filter),
+    studios
+      .aggregate<{ min: number; max: number }>([
+        { $group: { _id: null, min: { $min: "$hourlyRate" }, max: { $max: "$hourlyRate" } } },
+      ])
+      .toArray(),
+  ]);
+
   res.json({
     studios: list,
-    pagination: { page: 1, totalPages: 1, total: list.length },
+    pagination: {
+      page: currentPage,
+      limit: perPage,
+      total,
+      totalPages: Math.max(Math.ceil(total / perPage), 1),
+    },
+    priceRange: { min: bounds[0]?.min ?? 0, max: bounds[0]?.max ?? 0 },
   });
 };
 
