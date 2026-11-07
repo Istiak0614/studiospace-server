@@ -4,6 +4,7 @@ import { bookings, studios } from "../../config/db.js";
 import { BOOKING_STATUSES, type Booking, type BookingStatus } from "../../types/booking.js";
 import { toObjectId } from "../../utils/objectId.js";
 import { findConfirmedClash } from "../../utils/overlap.js";
+import { refreshBookingStatuses } from "../../utils/bookingStatus.js";
 
 const HOUR_MS = 60 * 60 * 1000;
 const MAX_HOURS = 12;
@@ -120,14 +121,13 @@ export const getBookedSlots: RequestHandler<{ id: string }> = async (req, res) =
   res.json(slots);
 };
 
-// GET /api/bookings/mine — the logged-in creator's bookings
 export const getMyBookings: RequestHandler = async (req, res) => {
   const email = req.user!.email;
+    await refreshBookingStatuses({ guestEmail: email });
   const list = await bookings.find({ guestEmail: email }).sort({ startTime: -1 }).toArray();
   res.json(list);
 };
 
-// PATCH /api/bookings/:id/cancel — PDF: creators can cancel while Pending
 export const cancelBooking: RequestHandler<{ id: string }> = async (req, res) => {
   const _id = toObjectId(req.params.id);
   if (!_id) {
@@ -162,9 +162,9 @@ export const cancelBooking: RequestHandler<{ id: string }> = async (req, res) =>
   res.json({ message: "Booking cancelled", booking: updated });
 };
 
-// GET /api/bookings/requests?status= — bookings for studios I host
 export const getBookingRequests: RequestHandler = async (req, res) => {
   const email = req.user!.email;
+    await refreshBookingStatuses({ hostEmail: email });
   const { status } = req.query as { status?: string };
 
   const filter: Filter<Booking> = { hostEmail: email };
@@ -176,7 +176,6 @@ export const getBookingRequests: RequestHandler = async (req, res) => {
   res.json(list);
 };
 
-// PATCH /api/bookings/:id/status — body: { status: "Confirmed" | "Cancelled" }
 export const updateBookingStatus: RequestHandler<{ id: string }> = async (req, res) => {
   const { status } = req.body ?? {};
   if (status !== "Confirmed" && status !== "Cancelled") {

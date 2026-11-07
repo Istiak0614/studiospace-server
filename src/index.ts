@@ -9,6 +9,7 @@ import { errorHandler, notFound } from "./middleware/errorHandler.js";
 import tokenRoutes from "./modules/auth/token.routes.js";
 import studioRoutes from "./modules/studio/studio.routes.js";
 import bookingRoutes from "./modules/booking/booking.routes.js";
+import reviewRoutes from "./modules/review/review.routes.js";
 
 
 const app = express();
@@ -34,6 +35,7 @@ app.get("/api/health", async (_req, res) => {
 app.use("/api", tokenRoutes);
 app.use("/api/studios", studioRoutes);
 app.use("/api/bookings", bookingRoutes);
+app.use("/api/reviews", reviewRoutes);
 app.use(notFound);
 app.use(errorHandler);
 

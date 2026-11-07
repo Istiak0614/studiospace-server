@@ -10,11 +10,13 @@ import {
   updateStudio,
 } from "./studio.controller.js";
 import { getBookedSlots } from "../booking/booking.controller.js";
+import { getStudioReviews } from "../review/review.controller.js";
 
 const router = Router();
 
 router.get("/", getStudios);
 router.get("/featured", getFeaturedStudios);
+router.get("/:id/reviews", getStudioReviews);
 
 router.get("/mine", verifyToken, getMyStudios); 
 router.post("/", verifyToken, createStudio);
