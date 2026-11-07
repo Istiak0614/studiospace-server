@@ -1,10 +1,16 @@
 import "dotenv/config";
-import { client, studios } from "../config/db.js";
+import type { WithId } from "mongodb";
+import { bookings, client, reviews, studios } from "../config/db.js";
+import type { Booking } from "../types/booking.js";
 import type { Studio } from "../types/studio.js";
+import { ensureIndexes } from "../utils/indexes.js";
+import { recalculateStudioRating } from "../utils/rating.js";
 
-// Seed hosts use this domain, so re-running the seed only replaces seed data,
-// never studios that real users created.
-const SEED_EMAIL = /@hosts\.studiospace\.dev$/;
+const SEED_GUEST = /@guests\.studiospace\.dev$/;
+
+type SeedStudio = Omit<Studio, "_id" | "ownerEmail" | "ownerName" | "ownerPhoto" | "createdAt" | "updatedAt"> & {
+  host: keyof typeof HOSTS;
+};
 
 const HOSTS = {
   nadia: { name: "Nadia Rahman", email: "nadia@hosts.studiospace.dev" },
@@ -12,11 +18,6 @@ const HOSTS = {
   tanvir: { name: "Tanvir Ahmed", email: "tanvir@hosts.studiospace.dev" },
 };
 
-type SeedStudio = Omit<Studio, "_id" | "ownerEmail" | "ownerName" | "ownerPhoto" | "createdAt" | "updatedAt"> & {
-  host: keyof typeof HOSTS;
-};
-
-// rating/reviewCount are starting values; S12 replaces them with real reviews
 const DATA: SeedStudio[] = [
   {
     host: "nadia",
@@ -121,6 +122,29 @@ const DATA: SeedStudio[] = [
     rating: 4.6, reviewCount: 21,
   },
 ];
+const REVIEWERS = [
+  "Sadia Islam", "Rafiq Hasan", "Mehnaz Chowdhury", "Tanzim Rahman",
+  "Farhan Kabir", "Nusrat Jahan", "Arnob Das", "Lamia Akter",
+].map((name) => ({ name, email: `${name.split(" ")[0].toLowerCase()}@guests.studiospace.dev` }));
+
+const COMMENTS = [
+  "Exactly as pictured. Spotless, well lit and the host had everything ready before we arrived.",
+  "Booking was effortless and the space felt premium. We wrapped our session an hour early.",
+  "The equipment was in excellent condition and the host walked us through every setting.",
+  "Perfect for a small team. Easy to find, fast Wi-Fi and a quiet, focused atmosphere.",
+  "Clear pricing, quick confirmation and a smooth check-in. Highly recommended.",
+  "A little compact for big groups, but ideal for two or three people working together.",
+  "Professional setup at a fair hourly rate. It saved us renting gear separately.",
+  "Friendly host, flexible with load-in times and very responsive to messages.",
+  "Clean, organised and comfortable. Our whole crew was happy from start to finish.",
+  "Great value for the quality. The deposit was returned right after the session.",
+  "We've booked a lot of spaces in the city and this is one of the most thoughtfully run.",
+  "Everything worked first time, which made our tight schedule completely stress-free.",
+];
+
+const RATINGS = [5, 5, 4, 5, 4, 5, 5, 4];
+const DAY = 24 * 60 * 60 * 1000;
+const HOUR = 60 * 60 * 1000;
 
 async function seed() {
   const missing = DATA.filter((s) => s.images.length === 0 || s.images.some((url) => !url.startsWith("https://")));
@@ -130,20 +154,75 @@ async function seed() {
     return;
   }
 
-  const removed = await studios.deleteMany({ ownerEmail: { $regex: SEED_EMAIL } });
+  await ensureIndexes();
+  console.log("✓ Indexes ready");
 
   const now = Date.now();
-  const DAY = 24 * 60 * 60 * 1000;
-  const docs: Studio[] = DATA.map(({ host, ...studio }, i) => ({
-    ...studio,
-    ownerEmail: HOSTS[host].email,
-    ownerName: HOSTS[host].name,
-    createdAt: new Date(now - i * DAY), 
-    updatedAt: new Date(now - i * DAY),
-  }));
+  const seeded: WithId<Studio>[] = [];
+  for (const [i, { host, ...studio }] of DATA.entries()) {
+    const doc = await studios.findOneAndUpdate(
+      { ownerEmail: HOSTS[host].email, title: studio.title },
+      {
+        $set: { ...studio, ownerEmail: HOSTS[host].email, ownerName: HOSTS[host].name, updatedAt: new Date() },
+        $setOnInsert: { createdAt: new Date(now - (i + 30) * DAY) },
+      },
+      { upsert: true, returnDocument: "after" }
+    );
+    seeded.push(doc!);
+  }
+  console.log(`✓ ${seeded.length} seed studios up to date`);
 
-  const result = await studios.insertMany(docs);
-  console.log(`Removed ${removed.deletedCount} old seed studios, inserted ${result.insertedCount}.`);
+  await reviews.deleteMany({ userEmail: { $regex: SEED_GUEST } });
+  await bookings.deleteMany({ guestEmail: { $regex: SEED_GUEST } });
+
+  let reviewCount = 0;
+  for (const [i, studio] of seeded.entries()) {
+    const count = 3 + (i % 3); // 3–5 reviews per studio
+    for (let k = 0; k < count; k++) {
+      const reviewer = REVIEWERS[(i + k) % REVIEWERS.length];
+      const hours = 2 + (k % 3);
+      const start = new Date(now - (7 + i * 3 + k * 9) * DAY);
+      start.setUTCHours(4, 0, 0, 0); // 10:00 in Dhaka
+      const end = new Date(start.getTime() + hours * HOUR);
+
+      const booking: Booking = {
+        studioId: studio._id,
+        studioTitle: studio.title,
+        studioImage: studio.images[0],
+        studioLocation: studio.location,
+        hostEmail: studio.ownerEmail,
+        hostName: studio.ownerName,
+        guestEmail: reviewer.email,
+        guestName: reviewer.name,
+        startTime: start,
+        endTime: end,
+        hours,
+        hourlyRate: studio.hourlyRate,
+        securityDeposit: studio.securityDeposit,
+        totalPrice: hours * studio.hourlyRate + studio.securityDeposit,
+        status: "Completed",
+        createdAt: new Date(start.getTime() - 3 * DAY),
+        updatedAt: end,
+      };
+      const { insertedId } = await bookings.insertOne(booking);
+
+      await reviews.insertOne({
+        studioId: studio._id,
+        bookingId: insertedId,
+        userEmail: reviewer.email,
+        userName: reviewer.name,
+        rating: RATINGS[(i + k) % RATINGS.length],
+        comment: COMMENTS[(i * 3 + k) % COMMENTS.length],
+        createdAt: new Date(end.getTime() + 2 * HOUR),
+      });
+      reviewCount++;
+    }
+  }
+  console.log(`✓ ${reviewCount} seed reviews created`);
+
+  const all = await studios.find({}, { projection: { _id: 1 } }).toArray();
+  await Promise.all(all.map((s) => recalculateStudioRating(s._id)));
+  console.log(`✓ Ratings recalculated for ${all.length} studios`);
 }
 
 seed()

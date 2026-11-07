@@ -11,6 +11,7 @@ import studioRoutes from "./modules/studio/studio.routes.js";
 import bookingRoutes from "./modules/booking/booking.routes.js";
 import reviewRoutes from "./modules/review/review.routes.js";
 import wishlistRoutes from "./modules/wishlist/wishlist.routes.js";
+import dashboardRoutes from "./modules/dashboard/dashboard.routes.js";
 
 
 const app = express();
@@ -38,6 +39,7 @@ app.use("/api/studios", studioRoutes);
 app.use("/api/bookings", bookingRoutes);
 app.use("/api/reviews", reviewRoutes);
 app.use("/api/wishlist", wishlistRoutes);
+app.use("/api/dashboard", dashboardRoutes);
 app.use(notFound);
 app.use(errorHandler);
 

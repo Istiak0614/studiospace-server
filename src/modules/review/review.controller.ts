@@ -1,23 +1,10 @@
 import type { RequestHandler } from "express";
-import type { ObjectId } from "mongodb";
-import { bookings, db, reviews, studios } from "../../config/db.js";
+import { bookings, db, reviews } from "../../config/db.js";
 import type { Review } from "../../types/review.js";
 import { refreshBookingStatuses } from "../../utils/bookingStatus.js";
 import { toObjectId } from "../../utils/objectId.js";
+import { recalculateStudioRating } from "../../utils/rating.js";
 
-async function recalculateStudioRating(studioId: ObjectId) {
-  const [stats] = await reviews
-    .aggregate<{ avg: number; count: number }>([
-      { $match: { studioId } },
-      { $group: { _id: null, avg: { $avg: "$rating" }, count: { $sum: 1 } } },
-    ])
-    .toArray();
-
-  await studios.updateOne(
-    { _id: studioId },
-    { $set: { rating: stats ? Math.round(stats.avg * 10) / 10 : 0, reviewCount: stats?.count ?? 0 } }
-  );
-}
 
 export const createReview: RequestHandler = async (req, res) => {
   const user = req.user!;
